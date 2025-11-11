@@ -1,6 +1,7 @@
 modules = ["python-3.12"]
 [agent]
-expertMode = false
+expertMode = true
 
 [nix]
 channel = "stable-25_05"
+packages = ["openssl"]
