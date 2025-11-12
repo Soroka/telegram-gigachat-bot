@@ -255,7 +255,8 @@ async def process_article(message: types.Message, state: FSMContext):
         article.parse()
     except:
         await message.answer(
-            "❌ Извините, почему-то не распарсился текст, видимо спецсимволы, попробуем другой источник!")
+            "❌ Извините, почему-то не распарсился текст, видимо спецсимволы, попробуем другой источник!"
+        )
         await state.clear()
         return
 
