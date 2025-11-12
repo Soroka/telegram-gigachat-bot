@@ -38,7 +38,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 channel_texts = ""
 MIN_TEXT_LEN = 20
-MAX_TEXT_LEN = 1000
+MAX_TEXT_LEN = 3000
 MAX_EXAMPLES = 5
 MIN_EXAMPLES = 3
 MAX_POST_LIMIT = 500
@@ -249,10 +249,16 @@ async def process_article(message: types.Message, state: FSMContext):
     """Обработка поста и генерация нового текста по примерам"""
     if await state.get_state() != PostGeneration.waiting_for_link:
         return
+    try:
+        article = Article(message.text)
+        article.download()
+        article.parse()
+    except:
+        await message.answer(
+            "❌ Извините, почему-то не распарсился текст, видимо спецсимволы, попробуем другой источник!")
+        await state.clear()
+        return
 
-    article = Article(message.text)
-    article.download()
-    article.parse()
     # Проверили, что текст минимально адекватен
     if len(article.text) < MIN_TEXT_LEN:
         await message.answer(
