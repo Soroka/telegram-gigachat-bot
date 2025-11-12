@@ -38,6 +38,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 channel_texts = ""
 MIN_TEXT_LEN = 20
+MAX_TEXT_LEN = 1000
 MAX_EXAMPLES = 5
 MIN_EXAMPLES = 3
 MAX_POST_LIMIT = 500
@@ -253,9 +254,15 @@ async def process_article(message: types.Message, state: FSMContext):
     article.download()
     article.parse()
     # Проверили, что текст минимально адекватен
-    if len(article.text) < 20:
+    if len(article.text) < MIN_TEXT_LEN:
         await message.answer(
             "❌ Извините, не распарсился текст, попробуем другой источник!")
+        await state.clear()
+        return
+
+    if len(article.text) > MAX_TEXT_LEN:
+        await message.answer(
+            "❌ Извините, очень длинный текст, попробуем другой источник!")
         await state.clear()
         return
 
