@@ -11,7 +11,7 @@ import os
 import re
 from telethon import TelegramClient
 from newspaper import Article, Config
-from background import keep_alive 
+from background import keep_alive
 
 user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124  Safari/537.36'
 
@@ -37,6 +37,10 @@ bot = Bot(token=TELEGRAM_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 channel_texts = ""
+MIN_TEXT_LEN = 20
+MAX_EXAMPLES = 5
+MIN_EXAMPLES = 3
+MAX_POST_LIMIT = 500
 
 
 # FSM States для диалога
@@ -111,12 +115,11 @@ async def generate_post_gigachat(prompt: str) -> str:
         }
 
         # Системный промпт для форматирования поста
-        system_prompt = """Ты — опытный копирайтер. Твоя задача — переписать текст таким образом, чтобы он соответствовал стилю примеров ниже.\n#### Инструкция по выполнению задания\n1. Проанализируй исходный текст, выделив основную мысль.\n2. Пересмотри структуру текста, адаптируя ее под лексику и стиль примеров.\n3. Изменяй лексику и стилистику изложения согласно стилю примеров ниже.\n4. Сохраняй ясность и убедительность оригинальной версии, избегая повторений и лишних слов.\n#### Критерии качества\n- Ясность и точность передачи ключевой информации\n- Соответствие стилю примеров\n- Приведи измененный текст, придерживаясь критериев качества.
-- Вот примеры и исходный текст:"""
+        system_prompt = """Ты — опытный копирайтер. Твоя задача — переписать исходный текст таким образом, чтобы он соответствовал лексике и стилю примеров ниже.\n#### Инструкция по выполнению задания\n1. Проанализируй исходный текст, выделив основную мысль.\n2. Пересмотри структуру текста, адаптируя ее под стилистику примеров.\n3. Изменяй стилистику изложения согласно стилю примеров.\n4. Сохраняй ясность и убедительность оригинальной версии, избегая повторений и лишних слов.\n#### Критерии качества\n- Ясность и точность передачи ключевой информации\n- Соответствие заявленному виду текста и стилю\n- Сохранение привлекательности и воздействия оригинального текста\n- Грамотность и соответствие языковым нормам\n#### Формат ответа\n- Перепиши исходный текст в стилистике примеров.\n- Приведи измененный текст, придерживаясь критериев качества."""
 
         payload = {
             "model":
-            "GigaChat",
+            "GigaChat-2-Max",
             "messages": [{
                 "role": "system",
                 "content": system_prompt
@@ -131,7 +134,6 @@ async def generate_post_gigachat(prompt: str) -> str:
             "max_tokens":
             1024
         }
-
         async with aiohttp.ClientSession() as session:
             async with session.post(url,
                                     json=payload,
@@ -196,74 +198,75 @@ async def process_channel(message: types.Message, state: FSMContext):
     global channel_texts
     keyword = None
 
+    # Проверяем, что название канала адекватное
     if not re.match(
-            "[@][A-z0-9]+([#][A-zабвгдежзийклмнопрстуфзцчшщэюя_0-9])?", message.text):
+            "^[@][A-z0-9]*([#][A-zабвгдежзийклмнопрстуфзцчшщэюя_0-9]*)?",
+            message.text):
         await message.answer(
             "❌ Извините, странное название канала или ключевые слова, попробуем ещё!"
         )
         await state.clear()
         return
 
+    # Отрезаем ключевое слово или тег
     if '#' in message.text:
         channel, keyword = message.text.split('#')
     else:
         channel = message.text
-
-    async for post in client.iter_messages(channel, limit=300):
-        print(post.id, post.text)
-        if len(post.text) > 20 and not keyword or keyword.lower(
-        ) in post.text.lower():
-            counter += 1
-            examples += f"\nПример {counter}: " + post.raw_text + '\n'
-        if counter > 5:
-            break
-
-    if counter < 2:
+    try:
+        async for post in client.iter_messages(channel, limit=MAX_POST_LIMIT):
+            if not post or not post.text:
+                continue
+            if len(post.text) > MIN_TEXT_LEN and (
+                    not keyword or keyword.lower() in post.text.lower()):
+                counter += 1
+                examples += f"\nПример {counter}: " + post.raw_text + '\n'
+            if counter > MAX_EXAMPLES:
+                break
+    # Обрабатываем ошибку, если нет такого канала
+    except ValueError:
+        pass
+    # Собралось недостаточно постов для примеров в промпте
+    if counter < MIN_EXAMPLES:
         await message.answer(
             "❌ Извините, не читается канал или мало постов с такими ключевыми словами, попробуем другой источник!"
         )
         await state.clear()
         return
-
-    # Отправляем сообщение о генерации
+    # Сохранили примеры для промпта
     channel_texts = examples
     await message.reply(
         "✍️ Дай ссылку на оригинальный текст:\n\n"
         "Например:\n"
-        "• https://news.ru/moskva/u-tolknuvshej-devochku-na-relsy-v-metro-pensionerki-nashli-neobychnyj-diagnoz\n"
+        " • https://news.ru/society/gotovlyu-fyddzhyn-po-domashnemu-kefirnoe-testo-i-rublenoe-myaso-sozdayut-kavkazskij-shedevr\n"
     )
     await state.set_state(PostGeneration.waiting_for_link)
 
-    #await state.clear()
-
 
 @dp.message(PostGeneration.waiting_for_link)
-async def process_topic(message: types.Message, state: FSMContext):
-    """Обработка темы поста и генерация текста"""
-    current_state = await state.get_state()
-    if current_state != PostGeneration.waiting_for_link:
+async def process_article(message: types.Message, state: FSMContext):
+    """Обработка поста и генерация нового текста по примерам"""
+    if await state.get_state() != PostGeneration.waiting_for_link:
         return
 
     article = Article(message.text)
     article.download()
     article.parse()
-
+    # Проверили, что текст минимально адекватен
     if len(article.text) < 20:
         await message.answer(
             "❌ Извините, не распарсился текст, попробуем другой источник!")
         await state.clear()
         return
 
-    # Отправляем сообщение о генерации
-    wait_message = await message.answer("⏳ Генерирую пост, подождите...")
+    # Показываем пользователю распаршенный текст
+    wait_message = await message.answer(
+        "Проверьте пожалуйста, как распарсился исходный текст, иногда он не распаршивается верно: \n\n"
+        + article.text)
 
-    topic = channel_texts + "\nИсходный текст: " + article.text
-    print(topic)
+    prompt = channel_texts + "\nИсходный текст: " + article.text
     # Генерируем пост через GigaChat
-    post_text = await generate_post_gigachat(topic)
-
-    # Удаляем сообщение ожидания
-    await wait_message.delete()
+    post_text = await generate_post_gigachat(prompt)
 
     # Отправляем сгенерированный пост
     await message.answer(post_text)
