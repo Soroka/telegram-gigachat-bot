@@ -10,16 +10,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import os
 import re
 from telethon import TelegramClient
-
 from newspaper import Article, Config
+from background import keep_alive 
 
 user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124  Safari/537.36'
 
 config = Config()
 config.browser_user_agent = user_agent
-
-# Загрузка переменных окружения
-#load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
@@ -44,7 +41,7 @@ channel_texts = ""
 
 # FSM States для диалога
 class PostGeneration(StatesGroup):
-    waiting_for_topic = State()
+    waiting_for_examples = State()
     waiting_for_link = State()
 
 
@@ -91,10 +88,10 @@ async def get_gigachat_token(auth_key: str, scope: str) -> str:
 
 async def generate_post_gigachat(prompt: str) -> str:
     """
-    Генерация текста поста через GigaChat API
+    Генерация стилизованного поста через GigaChat API
     
     Args:
-        prompt: Тема поста от пользователя
+        prompt: Примеры откуда брать стиль и текст для перефразирования
     
     Returns:
         Сгенерированный текст поста
@@ -114,7 +111,7 @@ async def generate_post_gigachat(prompt: str) -> str:
         }
 
         # Системный промпт для форматирования поста
-        system_prompt = """Ты — опытный копирайтер. Твоя задача — переписать текст таким образом, чтобы он соответствовал стилю примеров ниже.\n#### Инструкция по выполнению задания\n1. Проанализируй исходный текст, выделив основную мысль.\n2. Пересмотри структуру текста, адаптируя ее под лексику и стиль примеров.\n3. Изменяй лексику и стилистику изложения согласно стилю примеров ниже.\n4. Сохраняй ясность и убедительность оригинальной версии, избегая повторений и лишних слов.\n#### Критерии качества\n- Ясность и точность передачи ключевой информации\n- Соответствие стилю примеров\n- Сохранение привлекательности и воздействия оригинального текста\n- Грамотность и соответствие языковым нормам\n#### Формат ответа\n- Приведи измененный текст, придерживаясь критериев качества.
+        system_prompt = """Ты — опытный копирайтер. Твоя задача — переписать текст таким образом, чтобы он соответствовал стилю примеров ниже.\n#### Инструкция по выполнению задания\n1. Проанализируй исходный текст, выделив основную мысль.\n2. Пересмотри структуру текста, адаптируя ее под лексику и стиль примеров.\n3. Изменяй лексику и стилистику изложения согласно стилю примеров ниже.\n4. Сохраняй ясность и убедительность оригинальной версии, избегая повторений и лишних слов.\n#### Критерии качества\n- Ясность и точность передачи ключевой информации\n- Соответствие стилю примеров\n- Приведи измененный текст, придерживаясь критериев качества.
 - Вот примеры и исходный текст:"""
 
         payload = {
@@ -180,7 +177,7 @@ async def cmd_help(message: types.Message):
 @dp.message(Command("post"))
 async def cmd_post(message: types.Message, state: FSMContext):
     """Обработчик команды /post"""
-    await state.set_state(PostGeneration.waiting_for_topic)
+    await state.set_state(PostGeneration.waiting_for_examples)
     await message.reply(
         "✍️ Напиши id канала через @, можно с ключевым словом через хештег:\n\n"
         " Рекомендуемые:\n"
@@ -191,16 +188,16 @@ async def cmd_post(message: types.Message, state: FSMContext):
         "Выбор непредсказуемого канала даст непредсказуемый результат!")
 
 
-@dp.message(PostGeneration.waiting_for_topic)
+@dp.message(PostGeneration.waiting_for_examples)
 async def process_channel(message: types.Message, state: FSMContext):
-    """Обработка постов из канала"""
+    """Обработка постов из канала для стилизации"""
     examples = ""
     counter = 0
     global channel_texts
     keyword = None
 
     if not re.match(
-            "[@][A-z0-9]+([#][A-zабвгдежзийклмнопрстуфзцчшщэюя_0-9])?"):
+            "[@][A-z0-9]+([#][A-zабвгдежзийклмнопрстуфзцчшщэюя_0-9])?", message.text):
         await message.answer(
             "❌ Извините, странное название канала или ключевые слова, попробуем ещё!"
         )
@@ -295,6 +292,7 @@ async def main():
     try:
         # Запуск polling
         await client.start()
+        keep_alive()
         await dp.start_polling(bot)
     finally:
         await bot.session.close()
