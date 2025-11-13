@@ -6,3 +6,4 @@ newspaper3k
 lxml-html-clean
 flask
 requests
+openai
